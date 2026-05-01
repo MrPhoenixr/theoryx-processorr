@@ -1,6 +1,6 @@
 const express = require('express');
 const { google } = require('googleapis');
-const fetch = (...args) => import('node-fetch').then(({default: f}) => f(...args));
+const fetch = require('node-fetch');
 const stream = require('stream');
 
 const app = express();
@@ -34,7 +34,7 @@ app.post('/download-and-cache-assets', (req, res) => {
 // Render long-form — يرجع videoUrl حقيقي
 app.post('/render-longform', (req, res) => {
   const { episodeId, workDir, mood } = req.body;
-  const videoUrl = `https://theoryx-processorr.onrender.com/sample-longform.mp4`;
+  const videoUrl = `https://theoryx-processor.onrender.com/sample-longform.mp4`;
   res.json({
     success: true, episodeId,
     outputPath: workDir + '/final_longform.mp4',
@@ -48,7 +48,7 @@ app.post('/render-longform', (req, res) => {
 // Render short-form
 app.post('/render-shortform', (req, res) => {
   const { episodeId, workDir } = req.body;
-  const videoUrl = `https://theoryx-processorr.onrender.com/sample-shortform.mp4`;
+  const videoUrl = `https://theoryx-processor.onrender.com/sample-shortform.mp4`;
   res.json({
     success: true, episodeId,
     outputPath: workDir + '/final_shortform.mp4',
