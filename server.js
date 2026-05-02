@@ -2,7 +2,8 @@ const express = require('express');
 const { google } = require('googleapis');
 const fetch = require('node-fetch');
 const stream = require('stream');
-const fs = require('fs');   // ✅ تأكد من وجود هذه المكتبة
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(express.json({ limit: '500mb' }));
@@ -15,25 +16,47 @@ const oauth2Client = new google.auth.OAuth2(
 oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
 const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
 
-// Health check
 app.get('/', (req, res) => res.json({ status: 'theoryx-processor running ✅' }));
 
-// ✅ نقطة نهاية لخدمة الفيديو (تدعم مجلدين مختلفين)
+// ✅ نقطة نهاية مرنة للبحث عن الفيديو في مسارات متعددة
 app.get('/video/:episodeId/:format', (req, res) => {
   const { episodeId, format } = req.params;
+  
+  // تحويل format إلى صيغة اسم الملف (ممكن يكون shortform أو shortForm)
+  const formatVariants = [format, format.charAt(0).toUpperCase() + format.slice(1)];
+  
   const possiblePaths = [
+    // المسارات السابقة
     `/tmp/theoryx/${episodeId}/final_${format}.mp4`,
-    `/tmp/theory/${episodeId}/final_${format}.mp4`
+    `/tmp/theory/${episodeId}/final_${format}.mp4`,
+    // المسار الجديد مع مجلد video وأسماء ملفات مختلفة
+    `/tmp/theory/video/${episodeId}/final${formatVariants[1]}.mp4`,
+    `/tmp/theory/video/${episodeId}/final_${format}.mp4`,
+    `/tmp/theory/video/${episodeId}/final_${formatVariants[1]}.mp4`,
+    // محاولة عامة: البحث عن أي ملف mp4 داخل المجلد (أقل دقة لكن كحل أخير)
+    `/tmp/theory/${episodeId}/*.mp4`,
+    `/tmp/theory/video/${episodeId}/*.mp4`
   ];
+  
   for (const filePath of possiblePaths) {
-    if (fs.existsSync(filePath)) {
+    if (filePath.includes('*')) {
+      // إذا كان المسار يحتوي على wildcard، نبحث عن أول ملف mp4
+      const dir = path.dirname(filePath);
+      if (fs.existsSync(dir)) {
+        const files = fs.readdirSync(dir).filter(f => f.endsWith('.mp4'));
+        if (files.length > 0) {
+          return res.sendFile(path.join(dir, files[0]));
+        }
+      }
+    } else if (fs.existsSync(filePath)) {
       return res.sendFile(filePath);
     }
   }
-  res.status(404).json({ error: 'Video not found' });
+  
+  res.status(404).json({ error: 'Video not found', searchedPaths: possiblePaths });
 });
 
-// Download and cache assets
+// باقي endpoints كما هي (download-and-cache-assets, render-longform, render-shortform, upload-youtube, cleanup)
 app.post('/download-and-cache-assets', (req, res) => {
   const { episodeId, workDir, scenes, voiceoverPath, subtitlePath, mood } = req.body;
   const parsedScenes = typeof scenes === 'string' ? JSON.parse(scenes) : scenes;
@@ -47,7 +70,6 @@ app.post('/download-and-cache-assets', (req, res) => {
   });
 });
 
-// Render long-form (16:9)
 app.post('/render-longform', (req, res) => {
   const { episodeId, workDir, mood } = req.body;
   const baseUrl = `${req.protocol}://${req.get('host')}`;
@@ -62,7 +84,6 @@ app.post('/render-longform', (req, res) => {
   });
 });
 
-// Render short-form (9:16)
 app.post('/render-shortform', (req, res) => {
   const { episodeId, workDir } = req.body;
   const baseUrl = `${req.protocol}://${req.get('host')}`;
@@ -77,7 +98,6 @@ app.post('/render-shortform', (req, res) => {
   });
 });
 
-// Upload to YouTube (long or short)
 app.post('/upload-youtube', async (req, res) => {
   try {
     const { title, description, tags, isShort, credentials } = req.body;
@@ -143,7 +163,6 @@ app.post('/upload-youtube', async (req, res) => {
   }
 });
 
-// Cleanup temporary files
 app.post('/cleanup', (req, res) => {
   res.json({ success: true, deleted: req.body.workDir, timestamp: new Date().toISOString() });
 });
