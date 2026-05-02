@@ -1,11 +1,9 @@
-{
-  "name": "theoryx-processor",
-  "version": "1.0.0",
-  "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "dependencies": {
-    "express": "^4.18.2",
-    "googleapis": "^126.0.0",
-    "node-fetch": "^2.7.0"
+const possiblePaths = [
+  `/tmp/theoryx/${episodeId}/final_${format}.mp4`,
+  `/tmp/theory/${episodeId}/final_${format}.mp4`
+];
+for (const filePath of possiblePaths) {
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
   }
 }
