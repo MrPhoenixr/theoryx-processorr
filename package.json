@@ -1,9 +1,17 @@
-const possiblePaths = [
-  `/tmp/theoryx/${episodeId}/final_${format}.mp4`,
-  `/tmp/theory/${episodeId}/final_${format}.mp4`
-];
-for (const filePath of possiblePaths) {
-  if (fs.existsSync(filePath)) {
-    return res.sendFile(filePath);
+app.get('/video/:episodeId/:format', (req, res) => {
+  const { episodeId, format } = req.params;
+  
+  // المجلدات المحتملة حيث قد يكون الفيديو مخزناً
+  const possiblePaths = [
+    `/tmp/theoryx/${episodeId}/final_${format}.mp4`,
+    `/tmp/theory/${episodeId}/final_${format}.mp4`
+  ];
+  
+  for (const filePath of possiblePaths) {
+    if (fs.existsSync(filePath)) {
+      return res.sendFile(filePath);
+    }
   }
-}
+  
+  res.status(404).json({ error: 'Video not found' });
+});
