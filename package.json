@@ -1,17 +1,13 @@
-app.get('/video/:episodeId/:format', (req, res) => {
-  const { episodeId, format } = req.params;
-  
-  // المجلدات المحتملة حيث قد يكون الفيديو مخزناً
-  const possiblePaths = [
-    `/tmp/theoryx/${episodeId}/final_${format}.mp4`,
-    `/tmp/theory/${episodeId}/final_${format}.mp4`
-  ];
-  
-  for (const filePath of possiblePaths) {
-    if (fs.existsSync(filePath)) {
-      return res.sendFile(filePath);
-    }
+{
+  "name": "theoryx-processor",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": { 
+    "start": "node server.js" 
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "googleapis": "^126.0.0",
+    "node-fetch": "^2.7.0"
   }
-  
-  res.status(404).json({ error: 'Video not found' });
-});
+}
