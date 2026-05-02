@@ -2,7 +2,7 @@ const express = require('express');
 const { google } = require('googleapis');
 const fetch = require('node-fetch');
 const stream = require('stream');
-const fs = require('fs');
+const fs = require('fs');   // ✅ تأكد من وجود هذه المكتبة
 
 const app = express();
 app.use(express.json({ limit: '500mb' }));
@@ -18,15 +18,19 @@ const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
 // Health check
 app.get('/', (req, res) => res.json({ status: 'theoryx-processor running ✅' }));
 
-// Serve real video files for Telegram
+// ✅ نقطة نهاية لخدمة الفيديو (تدعم مجلدين مختلفين)
 app.get('/video/:episodeId/:format', (req, res) => {
   const { episodeId, format } = req.params;
-  const filePath = `/tmp/theoryx/${episodeId}/final_${format}.mp4`;
-  if (fs.existsSync(filePath)) {
-    res.sendFile(filePath);
-  } else {
-    res.status(404).json({ error: 'Video not found' });
+  const possiblePaths = [
+    `/tmp/theoryx/${episodeId}/final_${format}.mp4`,
+    `/tmp/theory/${episodeId}/final_${format}.mp4`
+  ];
+  for (const filePath of possiblePaths) {
+    if (fs.existsSync(filePath)) {
+      return res.sendFile(filePath);
+    }
   }
+  res.status(404).json({ error: 'Video not found' });
 });
 
 // Download and cache assets
@@ -43,7 +47,7 @@ app.post('/download-and-cache-assets', (req, res) => {
   });
 });
 
-// Render long-form (16:9) — returns real video URL
+// Render long-form (16:9)
 app.post('/render-longform', (req, res) => {
   const { episodeId, workDir, mood } = req.body;
   const baseUrl = `${req.protocol}://${req.get('host')}`;
@@ -58,7 +62,7 @@ app.post('/render-longform', (req, res) => {
   });
 });
 
-// Render short-form (9:16) — returns real video URL
+// Render short-form (9:16)
 app.post('/render-shortform', (req, res) => {
   const { episodeId, workDir } = req.body;
   const baseUrl = `${req.protocol}://${req.get('host')}`;
@@ -88,12 +92,12 @@ app.post('/upload-youtube', async (req, res) => {
       customAuth.setCredentials({ refresh_token: credentials.refreshToken });
       auth = customAuth;
     }
-
     const yt = google.youtube({ version: 'v3', auth });
+
     const videoUrl = req.body.videoUrl || req.body.videoPath;
-    const videoRes = await fetch(videoUrl);
-    if (!videoRes.ok) throw new Error(`Failed to fetch video: ${videoRes.status}`);
-    const videoBuffer = await videoRes.buffer();
+    const response_video = await fetch(videoUrl);
+    if (!response_video.ok) throw new Error(`Failed to fetch video: ${response_video.status}`);
+    const videoBuffer = await response_video.buffer();
     const videoStream = stream.Readable.from(videoBuffer);
 
     let tagsArray = Array.isArray(tags) ? tags : (tags || '').split(',').map(t => t.trim()).filter(Boolean);
