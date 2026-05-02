@@ -18,45 +18,29 @@ const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
 
 app.get('/', (req, res) => res.json({ status: 'theoryx-processor running ✅' }));
 
-// ✅ نقطة نهاية مرنة للبحث عن الفيديو في مسارات متعددة
+// ========== نقطة نهاية مرنة للبحث عن أي فيديو mp4 داخل المجلد ==========
 app.get('/video/:episodeId/:format', (req, res) => {
   const { episodeId, format } = req.params;
-  
-  // تحويل format إلى صيغة اسم الملف (ممكن يكون shortform أو shortForm)
-  const formatVariants = [format, format.charAt(0).toUpperCase() + format.slice(1)];
-  
-  const possiblePaths = [
-    // المسارات السابقة
-    `/tmp/theoryx/${episodeId}/final_${format}.mp4`,
-    `/tmp/theory/${episodeId}/final_${format}.mp4`,
-    // المسار الجديد مع مجلد video وأسماء ملفات مختلفة
-    `/tmp/theory/video/${episodeId}/final${formatVariants[1]}.mp4`,
-    `/tmp/theory/video/${episodeId}/final_${format}.mp4`,
-    `/tmp/theory/video/${episodeId}/final_${formatVariants[1]}.mp4`,
-    // محاولة عامة: البحث عن أي ملف mp4 داخل المجلد (أقل دقة لكن كحل أخير)
-    `/tmp/theory/${episodeId}/*.mp4`,
-    `/tmp/theory/video/${episodeId}/*.mp4`
+  const possibleDirs = [
+    `/tmp/theoryx/${episodeId}`,
+    `/tmp/theory/${episodeId}`,
+    `/tmp/theory/video/${episodeId}`
   ];
-  
-  for (const filePath of possiblePaths) {
-    if (filePath.includes('*')) {
-      // إذا كان المسار يحتوي على wildcard، نبحث عن أول ملف mp4
-      const dir = path.dirname(filePath);
-      if (fs.existsSync(dir)) {
+  for (const dir of possibleDirs) {
+    if (fs.existsSync(dir)) {
+      try {
         const files = fs.readdirSync(dir).filter(f => f.endsWith('.mp4'));
         if (files.length > 0) {
           return res.sendFile(path.join(dir, files[0]));
         }
+      } catch (err) {
+        console.error('Error reading dir:', dir, err.message);
       }
-    } else if (fs.existsSync(filePath)) {
-      return res.sendFile(filePath);
     }
   }
-  
-  res.status(404).json({ error: 'Video not found', searchedPaths: possiblePaths });
+  res.status(404).json({ error: 'Video not found', episodeId, format });
 });
 
-// باقي endpoints كما هي (download-and-cache-assets, render-longform, render-shortform, upload-youtube, cleanup)
 app.post('/download-and-cache-assets', (req, res) => {
   const { episodeId, workDir, scenes, voiceoverPath, subtitlePath, mood } = req.body;
   const parsedScenes = typeof scenes === 'string' ? JSON.parse(scenes) : scenes;
@@ -103,7 +87,7 @@ app.post('/upload-youtube', async (req, res) => {
     const { title, description, tags, isShort, credentials } = req.body;
 
     let auth = oauth2Client;
-    if (credentials?.refreshToken && credentials.refreshToken !== 'YOUR_YOUTUBE_REFRESH_TOKEN') {
+    if (credentials && credentials.refreshToken && credentials.refreshToken !== 'YOUR_YOUTUBE_REFRESH_TOKEN') {
       const customAuth = new google.auth.OAuth2(
         credentials.clientId,
         credentials.clientSecret,
@@ -115,6 +99,9 @@ app.post('/upload-youtube', async (req, res) => {
     const yt = google.youtube({ version: 'v3', auth });
 
     const videoUrl = req.body.videoUrl || req.body.videoPath;
+    if (!videoUrl || (!videoUrl.startsWith('http://') && !videoUrl.startsWith('https://'))) {
+      throw new Error(`Invalid or missing video URL: ${videoUrl}`);
+    }
     const response_video = await fetch(videoUrl);
     if (!response_video.ok) throw new Error(`Failed to fetch video: ${response_video.status}`);
     const videoBuffer = await response_video.buffer();
@@ -144,9 +131,7 @@ app.post('/upload-youtube', async (req, res) => {
     });
 
     const videoId = result.data.id;
-    const youtubeUrl = isShort
-      ? `https://www.youtube.com/shorts/${videoId}`
-      : `https://www.youtube.com/watch?v=${videoId}`;
+    const youtubeUrl = isShort ? `https://www.youtube.com/shorts/${videoId}` : `https://www.youtube.com/watch?v=${videoId}`;
 
     res.json({
       success: true,
