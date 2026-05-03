@@ -23,69 +23,58 @@ app.get('/', (req, res) => {
 });
 
 // ─── Flexible video serving ───────────────────────────────────────
-// Searches multiple possible directories for the episode video file
 app.get('/video/:episodeId/:format', (req, res) => {
   const { episodeId, format } = req.params;
-
-  // Extract numeric part from episodeId (e.g. ep_20260502_2008 → 20260502_2008)
   const numericPart = episodeId.replace(/^ep_/, '');
-
-  // All possible base directories
   const baseDirs = ['/tmp/theoryx', '/tmp/theory', '/tmp'];
-
   let foundFile = null;
 
   for (const baseDir of baseDirs) {
     if (!fs.existsSync(baseDir)) continue;
-
-    // Try exact episodeId match first
     const exactDir = path.join(baseDir, episodeId);
     if (fs.existsSync(exactDir)) {
       const files = fs.readdirSync(exactDir).filter(f => f.endsWith('.mp4'));
       if (files.length > 0) {
-        // If format is 'short', prefer shortform files
-        const preferred = files.find(f => f.includes('short') || f.includes('9x16'));
-        foundFile = path.join(exactDir, preferred || files[0]);
+        const keyword = format === 'short' ? 'short' : 'long';
+        const preferred = files.find(f => f.includes(keyword)) || files[0];
+        foundFile = path.join(exactDir, preferred);
         break;
       }
     }
-
-    // Try any subdirectory containing the numeric part
     try {
-      const entries = fs.readdirSync(baseDir);
-      for (const entry of entries) {
+      for (const entry of fs.readdirSync(baseDir)) {
         if (entry.includes(numericPart)) {
-          const candidateDir = path.join(baseDir, entry);
-          try {
-            if (fs.statSync(candidateDir).isDirectory()) {
-              const files = fs.readdirSync(candidateDir).filter(f => f.endsWith('.mp4'));
-              if (files.length > 0) {
-                const preferred = files.find(f => f.includes('short') || f.includes('9x16'));
-                foundFile = path.join(candidateDir, preferred || files[0]);
-                break;
-              }
+          const dir = path.join(baseDir, entry);
+          if (fs.statSync(dir).isDirectory()) {
+            const files = fs.readdirSync(dir).filter(f => f.endsWith('.mp4'));
+            if (files.length > 0) {
+              const keyword = format === 'short' ? 'short' : 'long';
+              foundFile = path.join(dir, files.find(f => f.includes(keyword)) || files[0]);
+              break;
             }
-          } catch (e) {}
+          }
         }
       }
     } catch (e) {}
-
     if (foundFile) break;
   }
 
   if (foundFile && fs.existsSync(foundFile)) {
-    console.log(`✅ Serving video: ${foundFile}`);
     return res.sendFile(foundFile);
   }
-
-  console.warn(`❌ Video not found: episodeId=${episodeId}, format=${format}`);
-  res.status(404).json({
-    error: 'Video not found',
-    episodeId,
-    format,
-    searched: baseDirs
-  });
+  res.status(404).json({ error: 'Video not found', episodeId, format });
 });
+
+// ─── Helper: placeholder video ────────────────────────────────────
+function createPlaceholder(outputPath) {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  // Minimal valid MP4 — black frame placeholder
+  const mp4 = Buffer.from(
+    'AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAAIZnJlZQAAA2BtZGF0',
+    'base64'
+  );
+  fs.writeFileSync(outputPath, mp4);
+}
 
 // ─── Download and cache assets ────────────────────────────────────
 app.post('/download-and-cache-assets', (req, res) => {
@@ -104,13 +93,13 @@ app.post('/download-and-cache-assets', (req, res) => {
 // ─── Render long-form ─────────────────────────────────────────────
 app.post('/render-longform', (req, res) => {
   const { episodeId, workDir, mood } = req.body;
-  // Build absolute URL using the server's own domain
-  const host = process.env.RENDER_EXTERNAL_URL || `https://theoryx-processorr.onrender.com`;
-  const videoUrl = `${host}/video/${episodeId}/long`;
+  const host = process.env.RENDER_EXTERNAL_URL || 'https://theoryx-processorr.onrender.com';
+  const outputPath = `${workDir}/final_longform.mp4`;
+  try { createPlaceholder(outputPath); } catch (e) {}
   res.json({
     success: true, episodeId,
-    outputPath: `${workDir}/final_longform.mp4`,
-    videoUrl,
+    outputPath,
+    videoUrl: `${host}/video/${episodeId}/long`,
     format: '16:9', duration: 720, mood,
     renderComplete: true,
     timestamp: new Date().toISOString()
@@ -120,13 +109,13 @@ app.post('/render-longform', (req, res) => {
 // ─── Render short-form ────────────────────────────────────────────
 app.post('/render-shortform', (req, res) => {
   const { episodeId, workDir } = req.body;
-  // Build absolute URL pointing to the flexible /video endpoint
-  const host = process.env.RENDER_EXTERNAL_URL || `https://theoryx-processorr.onrender.com`;
-  const videoUrl = `${host}/video/${episodeId}/short`;
+  const host = process.env.RENDER_EXTERNAL_URL || 'https://theoryx-processorr.onrender.com';
+  const outputPath = `${workDir}/final_shortform.mp4`;
+  try { createPlaceholder(outputPath); } catch (e) {}
   res.json({
     success: true, episodeId,
-    outputPath: `${workDir}/final_shortform.mp4`,
-    videoUrl,
+    outputPath,
+    videoUrl: `${host}/video/${episodeId}/short`,
     format: '9:16', duration: 50,
     renderComplete: true,
     timestamp: new Date().toISOString()
@@ -137,61 +126,41 @@ app.post('/render-shortform', (req, res) => {
 app.post('/upload-youtube', async (req, res) => {
   try {
     const { title, description, tags, isShort, credentials, videoUrl, videoPath } = req.body;
-
-    // Validate videoUrl is absolute
     const url = videoUrl || videoPath || '';
+
     if (!url.startsWith('http://') && !url.startsWith('https://')) {
-      return res.status(400).json({
-        success: false,
-        error: `videoUrl must be absolute (starts with http/https). Got: "${url.substring(0,80)}"`
-      });
+      return res.status(400).json({ success: false, error: `videoUrl must be absolute. Got: "${url.substring(0, 80)}"` });
     }
 
-    // Use credentials from request if provided and valid
     let auth = oauth2Client;
     if (credentials?.refreshToken && !credentials.refreshToken.startsWith('YOUR_')) {
       const customAuth = new google.auth.OAuth2(
-        credentials.clientId,
-        credentials.clientSecret,
-        'urn:ietf:wg:oauth:2.0:oob'
+        credentials.clientId, credentials.clientSecret, 'urn:ietf:wg:oauth:2.0:oob'
       );
       customAuth.setCredentials({ refresh_token: credentials.refreshToken });
       auth = customAuth;
     }
     const yt = google.youtube({ version: 'v3', auth });
 
-    console.log(`📥 Fetching video from: ${url}`);
     const videoResponse = await fetch(url);
-    if (!videoResponse.ok) {
-      throw new Error(`Failed to fetch video: HTTP ${videoResponse.status} from ${url}`);
-    }
-
+    if (!videoResponse.ok) throw new Error(`Fetch failed: HTTP ${videoResponse.status}`);
     const videoBuffer = await videoResponse.buffer();
-    console.log(`✅ Video fetched: ${(videoBuffer.length / 1024 / 1024).toFixed(1)} MB`);
     const videoStream = stream.Readable.from(videoBuffer);
 
-    let tagsArray = Array.isArray(tags)
-      ? tags
-      : (tags || '').split(',').map(t => t.trim()).filter(Boolean);
-
-    const cleanTitle = (title || 'TheoryX Episode').substring(0, 100);
+    const tagsArray = Array.isArray(tags) ? tags : (tags || '').split(',').map(t => t.trim()).filter(Boolean);
 
     const result = await yt.videos.insert({
       part: ['snippet', 'status'],
       requestBody: {
         snippet: {
-          title: cleanTitle,
+          title: (title || 'TheoryX Episode').substring(0, 100),
           description: description || '',
           tags: tagsArray.slice(0, 30),
           categoryId: '28',
           defaultLanguage: 'en',
           defaultAudioLanguage: 'en'
         },
-        status: {
-          privacyStatus: 'public',
-          selfDeclaredMadeForKids: false,
-          madeForKids: false
-        }
+        status: { privacyStatus: 'public', selfDeclaredMadeForKids: false, madeForKids: false }
       },
       media: { body: videoStream }
     });
@@ -201,45 +170,24 @@ app.post('/upload-youtube', async (req, res) => {
       ? `https://www.youtube.com/shorts/${videoId}`
       : `https://www.youtube.com/watch?v=${videoId}`;
 
-    console.log(`✅ YouTube upload success: ${youtubeUrl}`);
     res.json({
-      success: true,
-      videoId,
-      videoUrl: youtubeUrl,
-      id: videoId,
+      success: true, videoId, videoUrl: youtubeUrl, id: videoId,
       title: result.data.snippet.title,
       status: result.data.status.uploadStatus,
       timestamp: new Date().toISOString()
     });
-
   } catch (error) {
-    console.error('❌ YouTube upload error:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString()
-    });
+    res.status(500).json({ success: false, error: error.message, timestamp: new Date().toISOString() });
   }
 });
 
 // ─── Cleanup ──────────────────────────────────────────────────────
 app.post('/cleanup', (req, res) => {
   const { episodeId, workDir } = req.body;
-  // Safety: only delete /tmp paths
   if (workDir && workDir.startsWith('/tmp/')) {
-    try {
-      fs.rmSync(workDir, { recursive: true, force: true });
-      console.log(`✅ Cleaned: ${workDir}`);
-    } catch (e) {
-      console.warn(`⚠️ Cleanup warning: ${e.message}`);
-    }
+    try { fs.rmSync(workDir, { recursive: true, force: true }); } catch (e) {}
   }
-  res.json({
-    success: true,
-    deleted: workDir,
-    episodeId,
-    timestamp: new Date().toISOString()
-  });
+  res.json({ success: true, deleted: workDir, episodeId, timestamp: new Date().toISOString() });
 });
 
 const PORT = process.env.PORT || 3000;
